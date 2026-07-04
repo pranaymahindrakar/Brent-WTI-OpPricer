@@ -1,0 +1,102 @@
+# Curated event calendar for chart annotations.
+#
+# 'dated' entries pin a note to one timestamp. All dates are verified against
+# official sources; add new events as they are confirmed. Do not guess dates.
+#
+# Sources:
+#   OPEC/OPEC+ meetings: https://www.opec.org/opec_web/en/press_room/calendar.htm
+#   FOMC:                https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+#   EIA reports:         https://www.eia.gov/petroleum/supply/weekly/
+#
+# 'recurring' entries are expanded across the chart span by annotate.py. The EIA
+# Weekly Petroleum Status Report lands on Wednesdays at 10:30 ET and is the
+# single most market-moving scheduled release for WTI.
+
+dated:
+  # OPEC+ Ministerial meetings (Joint Ministerial Monitoring Committee and full
+  # ministerial conferences). Dates are the first day of each session.
+  - date: "2025-02-03"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ JMMC ministerial meeting"
+  - date: "2025-04-03"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ ministerial meeting; announced accelerated output increase"
+  - date: "2025-05-05"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ ministerial meeting; agreed further output increase from June"
+  - date: "2025-06-01"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ ministerial meeting"
+  - date: "2025-11-17"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ ministerial meeting"
+  - date: "2026-02-02"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ JMMC ministerial meeting"
+  - date: "2026-06-01"
+    kind: "opec"
+    severity: "high"
+    text: "OPEC+ ministerial meeting"
+
+  # FOMC rate decisions (announcement day). All times 14:00 ET.
+  - date: "2025-01-29"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (January 2025); held rates steady"
+  - date: "2025-03-19"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (March 2025); held rates steady"
+  - date: "2025-05-07"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (May 2025); held rates steady"
+  - date: "2025-06-18"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (June 2025)"
+  - date: "2025-07-30"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (July 2025)"
+  - date: "2025-09-17"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (September 2025)"
+  - date: "2025-10-29"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (October 2025)"
+  - date: "2025-12-10"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (December 2025)"
+  - date: "2026-01-28"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (January 2026)"
+  - date: "2026-03-18"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (March 2026)"
+  - date: "2026-04-29"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (April 2026)"
+  - date: "2026-06-17"
+    kind: "fomc"
+    severity: "medium"
+    text: "FOMC rate decision (June 2026)"
+
+recurring:
+  - rule: "weekly"
+    weekday: "wednesday"
+    time_et: "10:30"
+    kind: "eia_report"
+    text: "EIA Weekly Petroleum Status Report"

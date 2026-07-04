@@ -1,0 +1,24 @@
+# Streamlit runtime config. Committed so the deployed app matches local styling.
+# Secrets do NOT go here; they go in .streamlit/secrets.toml (gitignored) locally
+# and in the Streamlit Community Cloud "Secrets" panel in production.
+
+[theme]
+# Match the dark Plotly canvas the charts are drawn on (#0E1117).
+base = "dark"
+primaryColor = "#4C9BE8"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#1E2329"
+textColor = "#FAFAFA"
+
+[server]
+headless = true
+# Streamlit Cloud terminates TLS for you; keep XSRF on, CORS off is fine there.
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+# Re-run only the changed fragment where possible; keeps the auto-refresh cheap.
+fastReruns = true
