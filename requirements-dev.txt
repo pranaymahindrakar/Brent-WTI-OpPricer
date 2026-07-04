@@ -1,0 +1,3 @@
+# Local development / CI only. Not installed on Streamlit Community Cloud.
+-r requirements.txt
+pytest>=8.0

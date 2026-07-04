@@ -1,0 +1,18 @@
+# Pinned lower bounds keep the Streamlit Cloud build reproducible without
+# freezing to exact versions that may vanish from PyPI. yfinance is deliberately
+# left flexible: Yahoo changes its endpoints often and only recent yfinance
+# releases keep working, so let the resolver take the newest.
+streamlit>=1.40,<2
+pandas>=2.2,<3
+numpy>=1.26,<3
+duckdb>=1.1
+plotly>=5.24,<7
+anthropic>=0.40
+google-genai>=1.0
+apscheduler>=3.10,<4
+pyyaml>=6.0
+python-dotenv>=1.0
+fredapi>=0.5
+pandas-market-calendars>=4.4
+truststore>=0.9
+yfinance
