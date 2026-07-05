@@ -1,4 +1,4 @@
-"""Grounded LLM insight via the Anthropic API.
+"""Grounded LLM insight via the Google Gemini API.
 
 The model narrates, it never computes. Every number it speaks is one Python has
 already calculated and passed into its context, and it is asked to return JSON
@@ -71,22 +71,26 @@ def generate(con, extra: dict | None = None) -> dict:
     payload = build_payload(con, extra=extra)
     if not payload:
         return {"summary": "No spread data available yet.", "claims": [], "caveats": []}
-    if not config.ANTHROPIC_API_KEY:
-        raise RuntimeError("ANTHROPIC_API_KEY not set; cannot generate insight.")
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set; cannot generate insight.")
 
-    from anthropic import Anthropic
+    from google import genai
+    from google.genai import types
 
-    client = Anthropic(api_key=config.ANTHROPIC_API_KEY)
-    msg = client.messages.create(
-        model=config.ANTHROPIC_MODEL,
-        max_tokens=800,
-        temperature=0.2,
-        system=SYSTEM,
-        messages=[{"role": "user", "content": json.dumps(payload)}],
+    # The system prompt carries the grounding rules; the payload is the only data
+    # the model may reference. Temperature is kept low so the note stays factual.
+    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=config.GEMINI_MODEL,
+        contents=json.dumps(payload),
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM,
+            temperature=0.2,
+            max_output_tokens=800,
+            response_mime_type="application/json",
+        ),
     )
-    text = "".join(
-        b.text for b in msg.content if getattr(b, "type", None) == "text"
-    )
+    text = response.text or ""
     try:
         note = json.loads(_extract_json(text))
     except json.JSONDecodeError:
@@ -95,6 +99,6 @@ def generate(con, extra: dict | None = None) -> dict:
 
     store.write_insight(
         con, payload["as_of"], json.dumps(payload),
-        json.dumps(note), config.ANTHROPIC_MODEL,
+        json.dumps(note), config.GEMINI_MODEL,
     )
     return note

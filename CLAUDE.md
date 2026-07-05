@@ -14,7 +14,7 @@ Build it phase by phase as defined in PLAN.md. Do not skip ahead.
 - Storage: DuckDB, single local file at data/tracker.duckdb
 - Compute: pandas + numpy
 - Scheduling: APScheduler inside the app
-- LLM insights: Anthropic Python SDK (anthropic), model claude-sonnet-4-6
+- LLM insights: Google Gemini Python SDK (google-genai), model gemini-2.0-flash
 - UI: Streamlit + Plotly
 - Tests: pytest
 

@@ -272,9 +272,9 @@ def _dashboard_tab() -> None:
 
     # Grounded insight
     st.subheader("Grounded insight")
-    if config.ANTHROPIC_API_KEY:
+    if config.GEMINI_API_KEY:
         if st.button("Generate insight note"):
-            with st.spinner("Calling Anthropic API..."):
+            with st.spinner("Calling Gemini API..."):
                 try:
                     # Ground the note with the latest Marketaux news sentiment if available.
                     mtx = _load_news().get("Marketaux Sentiment", [])
@@ -292,7 +292,7 @@ def _dashboard_tab() -> None:
                 except Exception as exc:
                     st.error(f"Insight failed: {exc}")
     else:
-        st.caption("Set ANTHROPIC_API_KEY in .env to enable grounded LLM insight notes.")
+        st.caption("Set GEMINI_API_KEY in .env to enable grounded LLM insight notes.")
 
     # Annotations table
     if not ann.empty:

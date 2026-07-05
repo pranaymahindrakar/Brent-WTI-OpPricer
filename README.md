@@ -23,7 +23,7 @@ to harden, extend, and validate each piece.
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env               # then fill in ANTHROPIC_API_KEY and FRED_API_KEY
+cp .env.example .env               # then fill in GEMINI_API_KEY and FRED_API_KEY
 ```
 
 ## Use
@@ -43,7 +43,7 @@ src/ingest.py     yfinance pollers, market-hours logic, bad-tick filter
 src/backfill.py   FRED history seed and reconciliation
 src/compute.py    alignment, spread, z-score, rolling stats
 src/annotate.py   rule-based and calendar annotations
-src/insights.py   grounded Anthropic API note
+src/insights.py   grounded Gemini API note
 src/app.py        Streamlit and Plotly dashboard
 src/events.yaml   curated event calendar
 tests/            unit tests for the compute and ingest logic
