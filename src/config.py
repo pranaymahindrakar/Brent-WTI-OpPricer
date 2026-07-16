@@ -43,6 +43,8 @@ FRED_API_KEY = os.getenv("FRED_API_KEY", "")
 EIA_API_KEY = os.getenv("EIA_API_KEY", "")
 NEWSAPI_KEY = os.getenv("NEWSAPI_KEY", "")
 MARKETAUX_KEY = os.getenv("MARKETAUX_KEY", "")
+MASSIVE_API_KEY = os.getenv("MASSIVE_API_KEY", "")
+MASSIVE_BASE_URL = os.getenv("MASSIVE_BASE_URL", "https://api.massive.com")
 
 # Marketaux news + entity-sentiment feed tunables.
 # Free tier returns 3 articles per request and allows 100 requests per day, so
@@ -80,6 +82,13 @@ VOL_SPIKE_MULT = float(os.getenv("VOL_SPIKE_MULT", "3.0"))
 
 # Reconciliation tolerance in USD/bbl between live close and FRED settlement.
 RECONCILE_TOL = float(os.getenv("RECONCILE_TOL", "1.50"))
+
+# Options analytics (Options tab). Underlyings are liquid crude/energy ETFs;
+# futures options on CL=F/BZ=F themselves aren't covered by massive or
+# yfinance. Risk-free rate feeds the local Black-Scholes fallback when massive
+# is unavailable and yfinance's chain (no greeks) is used instead.
+OPTIONS_UNDERLYINGS = ("USO", "XLE")
+OPTIONS_RISK_FREE_RATE = float(os.getenv("OPTIONS_RISK_FREE_RATE", "0.05"))
 
 # Ensure the data directory exists.
 DATA_DIR.mkdir(parents=True, exist_ok=True)

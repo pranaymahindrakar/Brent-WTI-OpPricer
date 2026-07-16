@@ -52,10 +52,26 @@ CREATE TABLE IF NOT EXISTS insights (
     note_text    VARCHAR,
     model        VARCHAR
 );
+CREATE TABLE IF NOT EXISTS options_snapshot (
+    ts                  TIMESTAMP,
+    ticker              VARCHAR,
+    underlying_price    DOUBLE,
+    atm_strike          DOUBLE,
+    atm_iv              DOUBLE,
+    put_call_oi_ratio   DOUBLE,
+    spread              DOUBLE,
+    spread_zscore       DOUBLE,
+    source              VARCHAR,
+    PRIMARY KEY (ts, ticker)
+);
 """
 
 BARS_COLS = ["ts", "symbol", "open", "high", "low", "close", "volume", "source"]
 SPREAD_COLS = ["ts", "brent", "wti", "spread", "zscore", "roll_mean", "roll_std", "corr", "pct_range"]
+OPTIONS_SNAPSHOT_COLS = [
+    "ts", "ticker", "underlying_price", "atm_strike", "atm_iv",
+    "put_call_oi_ratio", "spread", "spread_zscore", "source",
+]
 
 
 def connect(db_path: Optional[str] = None) -> duckdb.DuckDBPyConnection:
@@ -158,3 +174,38 @@ def read_insights(con, start=None, end=None) -> pd.DataFrame:
         clauses.append("ts <= ?"); params.append(end)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     return _range(con, "insights", where, params)
+
+
+def write_options_snapshot(
+    con, ts, ticker, underlying_price, atm_strike, atm_iv,
+    put_call_oi_ratio, spread, spread_zscore, source,
+) -> None:
+    """Upsert one options snapshot row.
+
+    Written once per session/day from the Options tab so a rolling
+    correlation between options positioning and the spread's regime can
+    build up over time, and so the Research tab can show a real worked
+    Black-Scholes example instead of a synthetic one. One row per
+    (ts, ticker); a second write for the same ts/ticker overwrites rather
+    than duplicates.
+    """
+    con.execute(
+        "INSERT INTO options_snapshot VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (ts, ticker) DO UPDATE SET "
+        "underlying_price=excluded.underlying_price, atm_strike=excluded.atm_strike, "
+        "atm_iv=excluded.atm_iv, put_call_oi_ratio=excluded.put_call_oi_ratio, "
+        "spread=excluded.spread, spread_zscore=excluded.spread_zscore, source=excluded.source",
+        [ts, ticker, underlying_price, atm_strike, atm_iv, put_call_oi_ratio, spread, spread_zscore, source],
+    )
+
+
+def read_options_snapshot(con, ticker=None, start=None, end=None) -> pd.DataFrame:
+    clauses, params = [], []
+    if ticker:
+        clauses.append("ticker = ?"); params.append(ticker)
+    if start:
+        clauses.append("ts >= ?"); params.append(start)
+    if end:
+        clauses.append("ts <= ?"); params.append(end)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    return _range(con, "options_snapshot", where, params)
