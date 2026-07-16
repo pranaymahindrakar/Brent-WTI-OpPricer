@@ -9,6 +9,7 @@ either way.
 """
 from __future__ import annotations
 
+import sys
 from datetime import datetime
 from typing import Optional
 
@@ -27,9 +28,17 @@ def get_expiries(ticker: str) -> list[str]:
     import yfinance as yf
 
     try:
-        return list(yf.Ticker(ticker).options)
-    except Exception:
+        expiries = list(yf.Ticker(ticker).options)
+    except Exception as exc:
+        print(f"options.get_expiries({ticker}): yfinance raised {exc}", file=sys.stderr)
         return []
+    if not expiries:
+        print(
+            f"options.get_expiries({ticker}): yfinance returned no expiries "
+            "(often a transient Yahoo Finance rate limit; retrying later usually works)",
+            file=sys.stderr,
+        )
+    return expiries
 
 
 def _parse_massive_chain(body: dict) -> tuple[pd.DataFrame, Optional[float]]:

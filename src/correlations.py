@@ -6,6 +6,7 @@ z-score window so both metrics describe the same historical regime.
 """
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -181,6 +182,32 @@ CATEGORY_ICONS: dict[str, str] = {
 }
 
 
+def _to_daily_index(s: pd.Series) -> pd.Series:
+    """Snap a daily close series onto a tz-naive calendar-date index.
+
+    Every daily series here must key off the same thing: the calendar date of
+    the session. The two sources disagree on how they express that. yfinance
+    returns a tz-aware midnight-in-exchange-time index, while massive returns
+    the aggregate window's start as epoch milliseconds, which lands at 04:00 or
+    05:00 UTC (midnight ET, shifting with US daylight saving). Left alone, a
+    massive-sourced series and a yfinance-sourced series share no timestamps at
+    all, so they union into a frame of holes instead of aligning, and neither
+    one intersects the midnight-normalized spread index from _spread_daily.
+    That is silent: the correlation just comes back NaN and the UI prints N/A.
+    Normalizing both to midnight here is what makes the two sources
+    interchangeable, which is the whole premise of the massive/yfinance
+    fallback.
+    """
+    s = s.copy()
+    idx = pd.to_datetime(s.index)
+    if idx.tz is not None:
+        idx = idx.tz_localize(None)
+    s.index = idx.normalize()
+    # A normalize() can collide two bars onto one date (a DST-straddling pair,
+    # or an intraday bar slipping in); keep the last close for that session.
+    return s[~s.index.duplicated(keep="last")]
+
+
 def _fetch_one_price_series(ticker: str, period: str, start, end) -> pd.Series | None:
     """Fetch one ticker's daily close series, massive first, yfinance fallback.
 
@@ -192,13 +219,11 @@ def _fetch_one_price_series(ticker: str, period: str, start, end) -> pd.Series |
 
     massive_df = massive_client.aggs(ticker, start.isoformat(), end.isoformat())
     if not massive_df.empty:
-        return massive_df.set_index("ts")["close"].rename(ticker)
+        return _to_daily_index(massive_df.set_index("ts")["close"].rename(ticker))
     try:
         raw = yf.Ticker(ticker).history(period=period, interval="1d", auto_adjust=True)
         if not raw.empty:
-            s = raw["Close"].rename(ticker)
-            s.index = pd.to_datetime(s.index).tz_localize(None)
-            return s
+            return _to_daily_index(raw["Close"].rename(ticker))
     except Exception:
         pass
     return None
@@ -214,18 +239,61 @@ def fetch_prices(period: str = "2y") -> pd.DataFrame:
     """Fetch daily adjusted closing prices for all correlated assets.
 
     Tries massive.com first per ticker (real aggregates, no adjustment for
-    splits/dividends applied); falls back to yfinance (auto-adjusted close)
-    on any failure or missing key, so the app works identically either way.
+    splits/dividends applied). Whatever massive doesn't cover is fetched from
+    yfinance in a single batched yf.download() call rather than one request
+    per ticker: Yahoo Finance rate-limits shared cloud IPs (Streamlit Cloud
+    included) much more aggressively against a burst of ~18 sequential
+    per-ticker requests than a single batched one, so this is a real
+    reliability fix, not just a speed one.
     """
     start, end = _period_bounds(period)
-    frames = []
+    frames: dict[str, pd.Series] = {}
+    remaining = []
     for ticker in ASSETS:
-        s = _fetch_one_price_series(ticker, period, start, end)
-        if s is not None and not s.empty:
-            frames.append(s)
+        massive_df = massive_client.aggs(ticker, start.isoformat(), end.isoformat())
+        if not massive_df.empty:
+            frames[ticker] = _to_daily_index(massive_df.set_index("ts")["close"])
+        else:
+            remaining.append(ticker)
+
+    if remaining:
+        import yfinance as yf
+
+        try:
+            batch = yf.download(
+                tickers=remaining, period=period, interval="1d",
+                auto_adjust=True, group_by="ticker", threads=True, progress=False,
+            )
+        except Exception as exc:
+            print(f"correlations.fetch_prices: yf.download failed: {exc}", file=sys.stderr)
+            batch = pd.DataFrame()
+
+        if not batch.empty:
+            if isinstance(batch.columns, pd.MultiIndex):
+                have_tickers = set(batch.columns.get_level_values(0))
+                for t in remaining:
+                    if t in have_tickers and "Close" in batch[t]:
+                        s = batch[t]["Close"].dropna()
+                        if not s.empty:
+                            frames[t] = _to_daily_index(s)
+            elif len(remaining) == 1 and "Close" in batch:
+                s = batch["Close"].dropna()
+                if not s.empty:
+                    frames[remaining[0]] = _to_daily_index(s)
+
+        missing = [t for t in remaining if t not in frames]
+        if missing:
+            print(
+                f"correlations.fetch_prices: no data from massive or yfinance for {missing} "
+                "(likely rate-limited or delisted; check Streamlit Cloud logs for the yf.download error above)",
+                file=sys.stderr,
+            )
+
     if not frames:
         return pd.DataFrame()
-    return pd.concat(frames, axis=1).sort_index()
+    # Every series is already on a tz-naive calendar-date index via
+    # _to_daily_index, so this unions cleanly instead of interleaving.
+    return pd.DataFrame(frames).sort_index()
 
 
 def fetch_single_price(ticker: str, period: str = "2y") -> pd.Series:
@@ -317,6 +385,12 @@ def get_ticker_profile_info(ticker: str) -> dict:
     }
 
 
+# Fewest overlapping return observations we will report a correlation from.
+# Below this, a Pearson r is noise dressed up as a number: it stays in [-1, 1]
+# and looks authoritative no matter how thin the sample behind it is.
+MIN_CORR_OBS = 20
+
+
 def _spread_daily(spread_df: pd.DataFrame) -> pd.Series:
     """Resample the stored spread frame to one daily close per calendar day."""
     if spread_df.empty:
@@ -326,21 +400,55 @@ def _spread_daily(spread_df: pd.DataFrame) -> pd.Series:
     return s.resample("1D").last().dropna()
 
 
+def _returns(s: pd.Series) -> pd.Series:
+    """Daily percentage returns, with gaps left as gaps.
+
+    fill_method=None is load-bearing, not deprecation housekeeping. pandas'
+    pct_change still defaults to fill_method='pad', which forward-fills a
+    missing close and then reports the resulting flat day as a real 0.0%
+    return. That is fabricated data feeding a correlation, and it biases r
+    toward zero rather than failing loudly. A day with no close has no return;
+    say so, and let the pairwise alignment below drop it.
+    """
+    return s.pct_change(fill_method=None)
+
+
+def _aligned_returns(
+    spread_df: pd.DataFrame, prices_df: pd.DataFrame,
+) -> tuple[pd.Series, pd.DataFrame]:
+    """Spread returns and asset returns on a shared calendar-date index.
+
+    Alignment is pairwise, deliberately. Listwise deletion here (a plain
+    .dropna() across the asset frame) means one asset's missing session drops
+    that day for all ~17 of them, and the universe deliberately mixes trading
+    calendars: futures like HO=F and NG=F keep different holidays from the
+    equities, so listwise deletion silently shrinks everyone's sample to the
+    intersection of every calendar at once. Each asset is instead paired with
+    the spread on its own good days, in compute_current_corr/compute_rolling_corr.
+    """
+    if spread_df.empty or prices_df.empty:
+        return pd.Series(dtype=float), pd.DataFrame()
+    sp = _returns(_spread_daily(spread_df)).dropna()
+    ar = _returns(prices_df)
+    idx = sp.index.intersection(ar.index)
+    if idx.empty:
+        return pd.Series(dtype=float), pd.DataFrame()
+    return sp.loc[idx], ar.loc[idx]
+
+
 def compute_rolling_corr(
     spread_df: pd.DataFrame,
     prices_df: pd.DataFrame,
     window: int = 60,
 ) -> pd.DataFrame:
-    """Rolling `window`-day Pearson correlation of spread returns vs each asset's returns."""
-    if spread_df.empty or prices_df.empty:
+    """Rolling `window`-day Pearson correlation of spread returns vs each asset's returns.
+
+    Returns an empty frame when no asset has `window` overlapping observations.
+    """
+    s, a = _aligned_returns(spread_df, prices_df)
+    if s.empty or a.empty or len(s) < window:
         return pd.DataFrame()
-    sp = _spread_daily(spread_df).pct_change().dropna()
-    ar = prices_df.pct_change().dropna()
-    idx = sp.index.intersection(ar.index)
-    if len(idx) < window:
-        return pd.DataFrame()
-    s, a = sp.loc[idx], ar.loc[idx]
-    result = pd.DataFrame(index=idx)
+    result = pd.DataFrame(index=s.index)
     for col in a.columns:
         result[col] = s.rolling(window).corr(a[col])
     return result.dropna(how="all")
@@ -350,12 +458,28 @@ def compute_current_corr(
     spread_df: pd.DataFrame,
     prices_df: pd.DataFrame,
     window: int = 60,
+    min_obs: int = MIN_CORR_OBS,
 ) -> pd.Series:
-    """Scalar Pearson correlation for each asset over the most recent `window` trading days."""
-    if spread_df.empty or prices_df.empty:
-        return pd.Series(dtype=float)
-    sp = _spread_daily(spread_df).pct_change().dropna()
-    ar = prices_df.pct_change().dropna()
-    idx = sp.index.intersection(ar.index)
-    s, a = sp.loc[idx].tail(window), ar.loc[idx].tail(window)
-    return a.corrwith(s).rename("correlation")
+    """Scalar Pearson correlation for each asset over the most recent `window` trading days.
+
+    An asset with fewer than `min_obs` overlapping return observations gets NaN
+    rather than a number computed from a handful of days. The result carries
+    `.attrs["n_obs"]`, a per-asset count of the observations actually used, so
+    callers can label the figure with the window it really covers instead of
+    asserting a flat "60-day".
+    """
+    s, a = _aligned_returns(spread_df, prices_df)
+    if s.empty or a.empty:
+        out = pd.Series(dtype=float, name="correlation")
+        out.attrs["n_obs"] = {}
+        return out
+
+    s, a = s.tail(window), a.tail(window)
+    corr, n_obs = {}, {}
+    for col in a.columns:
+        pair = pd.concat([s, a[col]], axis=1).dropna()
+        n_obs[col] = len(pair)
+        corr[col] = pair.iloc[:, 0].corr(pair.iloc[:, 1]) if len(pair) >= min_obs else float("nan")
+    out = pd.Series(corr, dtype=float).rename("correlation")
+    out.attrs["n_obs"] = n_obs
+    return out

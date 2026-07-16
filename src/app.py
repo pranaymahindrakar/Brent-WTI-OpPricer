@@ -550,18 +550,37 @@ def _ticker_profile_dialog(ticker: str) -> None:
     day_change = (last / prev - 1.0) * 100 if prev else 0.0
 
     current_corr = None
+    corr_obs = 0
     if not spread.empty:
         corr_series = correlations.compute_current_corr(spread, series.to_frame(ticker))
+        corr_obs = corr_series.attrs.get("n_obs", {}).get(ticker, 0)
         if not corr_series.empty and pd.notna(corr_series.iloc[0]):
             current_corr = float(corr_series.iloc[0])
 
     mcol1, mcol2, mcol3 = st.columns(3)
     mcol1.metric("Last price", f"${last:,.2f}", f"{day_change:+.2f}%")
+    # Label the window actually covered. Calling a 20-observation correlation
+    # "60-day" because 60 was requested is exactly the kind of unearned
+    # confidence the spread's own z-score guardrails exist to prevent.
     mcol2.metric(
-        "60-day correlation with spread",
+        f"{corr_obs}-day correlation with spread" if current_corr is not None
+        else "Correlation with spread",
         f"{current_corr:+.2f}" if current_corr is not None else "N/A",
+        help=(
+            f"Pearson correlation of daily returns over the {corr_obs} sessions this "
+            f"ticker and the spread both traded."
+            if current_corr is not None else
+            f"Needs at least {correlations.MIN_CORR_OBS} sessions where this ticker and "
+            f"the spread both have a close; only {corr_obs} overlap so far. "
+            "Backfill spread history from the sidebar to extend it."
+        ),
     )
     mcol3.metric("Price history points", f"{len(series)}")
+    if current_corr is not None and corr_obs < 60:
+        st.caption(
+            f"Computed over {corr_obs} overlapping sessions, not a full 60-day window, "
+            "because the stored spread history is shorter than 60 days."
+        )
 
     fig_price = go.Figure(go.Scatter(
         x=series.index, y=series.values, line=dict(color="#4C9BE8", width=1.5),
@@ -587,6 +606,11 @@ def _ticker_profile_dialog(ticker: str) -> None:
                 yaxis=dict(range=[-1.1, 1.1], gridcolor="#1E2329", title="Rolling correlation"),
             )
             st.plotly_chart(fig_roll, use_container_width=True, key=f"profile_corr_{ticker}")
+        else:
+            st.caption(
+                "Rolling 60-day correlation needs more than 60 overlapping sessions "
+                "before it has a first point to plot."
+            )
 
     if meta.get("note"):
         st.markdown(f"**Why this might correlate with the spread:** {meta['note']}")
@@ -651,9 +675,40 @@ def _market_lens_tab() -> None:
     current = correlations.compute_current_corr(spread, prices)
     rolling = correlations.compute_rolling_corr(spread, prices)
 
-    if current.empty:
-        st.info("Not enough overlapping history to compute correlations yet.")
+    if current.empty or current.dropna().empty:
+        st.info(
+            f"Not enough overlapping history to compute correlations yet. Each asset "
+            f"needs at least {correlations.MIN_CORR_OBS} sessions where it and the "
+            "spread both have a close. Backfill spread history from the sidebar."
+        )
         return
+
+    # Assets the correlation had to skip are named rather than quietly dropped
+    # from the chart, so a missing asset is never mistaken for an uninteresting one.
+    n_obs = current.attrs.get("n_obs", {})
+    skipped = [t for t in current.index if pd.isna(current[t])]
+    if skipped:
+        st.caption(
+            "Not enough overlapping history for: "
+            + ", ".join(
+                f"{correlations.ASSETS.get(t, {}).get('name', t)} ({n_obs.get(t, 0)} sessions)"
+                for t in skipped
+            )
+        )
+
+    # The requested window is 60 days, but the stored spread history may be
+    # shorter; report what the number actually covers instead of the ask.
+    obs_used = [n_obs.get(t, 0) for t in current.dropna().index]
+    window_used = max(obs_used) if obs_used else 0
+    window_label = f"{window_used}-day" if window_used < 60 else "60-day"
+    if window_used < 60:
+        st.warning(
+            f"Spread history currently covers only {window_used} overlapping sessions, "
+            "so these are "
+            f"{window_used}-day correlations, not the full 60-day window, and the "
+            "rolling chart below cannot be drawn yet. Backfill from the sidebar "
+            "(needs FRED_API_KEY) to seed real history."
+        )
 
     # Current correlation bar chart: full width, up top, so it isn't left
     # towering over empty space next to a much taller list beside it.
@@ -673,7 +728,7 @@ def _market_lens_tab() -> None:
         textposition="outside",
     ))
     fig_bar.update_layout(
-        title="Current 60-day correlation with Brent-WTI spread",
+        title=f"Current {window_label} correlation with Brent-WTI spread",
         height=max(340, 26 * len(labels)),
         margin=dict(t=40, l=10, r=60, b=10),
         xaxis=dict(range=[-1.1, 1.1], gridcolor="#1E2329", zeroline=True,
@@ -732,6 +787,12 @@ def _market_lens_tab() -> None:
         st.caption(
             "Dashed green/red lines at ±0.5 mark the threshold for a strong correlation. "
             "Correlations that flip sign over time indicate regime changes."
+        )
+    else:
+        st.subheader("Rolling 60-day correlation over time")
+        st.info(
+            "A rolling 60-day correlation needs more than 60 overlapping sessions before "
+            "its first point exists. Backfill spread history from the sidebar to plot it."
         )
 
     st.subheader("Movement")
