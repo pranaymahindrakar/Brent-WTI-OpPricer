@@ -102,3 +102,42 @@ def generate(con, extra: dict | None = None) -> dict:
         json.dumps(note), config.GEMINI_MODEL,
     )
     return note
+
+
+NARRATE_SYSTEM = (
+    "You are writing a short plain-English caption for a panel on a financial "
+    "dashboard, aimed at a reader who isn't a quant. You will receive an "
+    "instruction describing what the panel shows and a JSON payload of "
+    "already-computed numbers. Rules: use ONLY the numbers in the payload, "
+    "never compute or infer new figures, never invent values. If the payload "
+    "doesn't support a clear statement, say so briefly instead of guessing. "
+    "Two to three sentences, plain text, no markdown, no bullet points, no "
+    "em dashes."
+)
+
+
+def narrate_metric(payload: dict, instruction: str) -> str:
+    """Produce a short, plain-English explanation of an already-computed metric.
+
+    Same non-negotiable rule as generate(): the model narrates numbers it is
+    handed, it never computes them. Returns plain text, not JSON, for inline
+    captions under charts. Raises if GEMINI_API_KEY isn't set; callers should
+    catch and degrade gracefully.
+    """
+    if not config.GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set; cannot narrate.")
+
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=config.GEMINI_API_KEY)
+    response = client.models.generate_content(
+        model=config.GEMINI_MODEL,
+        contents=f"Instruction: {instruction}\n\nData: {json.dumps(payload)}",
+        config=types.GenerateContentConfig(
+            system_instruction=NARRATE_SYSTEM,
+            temperature=0.2,
+            max_output_tokens=150,
+        ),
+    )
+    return (response.text or "").strip()
