@@ -174,12 +174,72 @@ def _ingest_and_compute(con) -> tuple[int, pd.DataFrame]:
 
 
 # ---------------------------------------------------------------------------
+# Tab purpose blurbs
+#
+# Single source of truth for "what is this tab for". Each tab renders its own
+# entry at the top via _tab_intro, and the About tab renders the whole dict as
+# an orientation map, so the two can never drift apart.
+# ---------------------------------------------------------------------------
+
+TAB_PURPOSE: dict[str, str] = {
+    "Dashboard": (
+        "The live view. Front-month Brent (BZ=F) minus WTI (CL=F) in USD per barrel, "
+        "its rolling z-score, and how stale the feed is right now. The chart is annotated "
+        "with rule-based and calendar events, and the insight panel is a Gemini note that "
+        "narrates only the numbers computed here. Start on this tab; the others explain or "
+        "contextualize what it shows."
+    ),
+    "Market Lens": (
+        "What the spread moves with. Rolling correlations between daily spread returns "
+        "and a categorized universe of related markets (refiners, energy equities, the dollar, "
+        "refined products, shipping). Use it to see which markets are currently tracking the "
+        "spread, and to look up any other stock or organization on demand."
+    ),
+    "Energy Trends": (
+        "The wider energy complex. Context beyond the spread itself: a performance heatmap "
+        "across energy assets, rolling 20-day annualized volatility for the current regime, the "
+        "spread's own distribution, and movement grouped by category. Answers whether a spread "
+        "move is idiosyncratic or part of a broader energy move."
+    ),
+    "Options": (
+        "Positioning and volatility. Live option chains with Greeks and implied-volatility "
+        "skew for liquid crude and energy ETFs (USO, XLE), since neither data source covers "
+        "options on the CL=F/BZ=F futures themselves. Also tracks ATM implied vol against the "
+        "spread z-score as history accumulates."
+    ),
+    "Research": (
+        "How every number is produced. The formulas behind the app: spread and z-score "
+        "construction, an Ornstein-Uhlenbeck mean-reversion fit with its half-life, and "
+        "Black-Scholes pricing and Greeks. Every figure shown elsewhere traces back to a "
+        "formula on this tab; the language model never computes any of them."
+    ),
+    "News": (
+        "What might explain a move. Energy headlines from yfinance, EIA, NewsAPI, and "
+        "Marketaux, plus per-entity news sentiment and the upcoming events calendar that feeds "
+        "the Dashboard annotations. Headlines are context for the chart, not inputs to any "
+        "calculation."
+    ),
+    "About": (
+        "Background reading. What WTI and Brent actually are, why a spread exists between "
+        "them, how to read a z-score, what the spread implies for different market "
+        "participants, and a glossary. Start here if the terminology on the other tabs is new."
+    ),
+}
+
+
+def _tab_intro(tab: str) -> None:
+    """Render the purpose blurb for `tab` at the top of that tab's body."""
+    st.caption(TAB_PURPOSE[tab])
+
+
+# ---------------------------------------------------------------------------
 # Tab 1: Dashboard (auto-refreshing fragment)
 # ---------------------------------------------------------------------------
 
 @st.fragment(run_every=config.POLL_SECONDS)
 def _dashboard_tab() -> None:
     con = get_con()
+    _tab_intro("Dashboard")
 
     # Auto-ingest during market hours. Only one session per POLL_SECONDS window
     # actually polls yfinance (throttle), and it holds the shared write lock so
@@ -194,7 +254,7 @@ def _dashboard_tab() -> None:
                 try:
                     n, _ = _ingest_and_compute(con)
                     if n:
-                        status_slot.success(f"Auto-fetched {n} new bars", icon="")
+                        status_slot.success(f"Auto-fetched {n} new bars")
                 except Exception as exc:
                     status_slot.warning(f"Auto-ingest error: {exc}")
 
@@ -638,6 +698,7 @@ def _ticker_profile_dialog(ticker: str) -> None:
 def _market_lens_tab() -> None:
     con = get_con()
     spread = store.read_spread(con)
+    _tab_intro("Market Lens")
 
     st.subheader("Spread correlations with related markets")
     st.caption(
@@ -875,6 +936,7 @@ def _grounded_paragraph(instruction: str, payload: dict) -> None:
 def _energy_trends_tab() -> None:
     con = get_con()
     spread = store.read_spread(con)
+    _tab_intro("Energy Trends")
 
     st.subheader("Oil and energy market trends")
     st.caption(
@@ -1079,6 +1141,8 @@ def _render_articles(articles: list[dict]) -> None:
 
 
 def _news_tab() -> None:
+    _tab_intro("News")
+
     ncol1, ncol2 = st.columns([5, 1])
     ncol1.subheader("Energy market news")
     if ncol2.button("Refresh news"):
@@ -1355,6 +1419,15 @@ _ABOUT_GLOSSARY = """
 
 
 def _about_tab() -> None:
+    _tab_intro("About")
+
+    st.subheader("Guide to the tabs")
+    st.caption("What each tab is for, so you know where to look.")
+    for name, purpose in TAB_PURPOSE.items():
+        st.markdown(f"- **{name}**: {purpose}")
+
+    st.divider()
+
     st.subheader("Understanding Brent, WTI, and the Spread")
     sections = {
         "West Texas Intermediate (WTI)": _ABOUT_WTI,
@@ -1381,6 +1454,7 @@ def _load_chain(ticker: str, expiration: str) -> dict:
 def _options_tab() -> None:
     con = get_con()
     spread = store.read_spread(con)
+    _tab_intro("Options")
 
     st.subheader("Live options and Greeks")
     st.caption(
@@ -1532,6 +1606,7 @@ def _spread_daily_series(spread_df: pd.DataFrame) -> pd.Series:
 def _research_tab() -> None:
     con = get_con()
     spread = store.read_spread(con)
+    _tab_intro("Research")
 
     st.subheader("Methodology")
     st.markdown(
